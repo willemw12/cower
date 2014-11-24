@@ -25,11 +25,13 @@
  */
 
 /* glibc */
+#include <arpa/inet.h>
 #include <ctype.h>
 #include <errno.h>
 #include <fnmatch.h>
 #include <getopt.h>
 #include <locale.h>
+#include <netdb.h>
 #include <pthread.h>
 #include <pwd.h>
 #include <regex.h>
@@ -38,6 +40,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/ioctl.h>
+#include <sys/socket.h>
 #include <wchar.h>
 #include <wordexp.h>
 
@@ -67,7 +70,9 @@ static inline void freep(void *p) { free(*(void**) p); }
 	#define PACMAN_CONFIG       "/etc/pacman.conf"
 #endif
 
-#define AUR_BASE_URL          "https://aur.archlinux.org"
+#define AUR_PROTO             "https"
+#define AUR_DOMAIN            "aur.archlinux.org"
+#define AUR_BASE_URL          AUR_PROTO "://" AUR_DOMAIN
 #define AUR_PKG_URL_FORMAT    AUR_BASE_URL "/packages/"
 #define AUR_RPC_URL           AUR_BASE_URL "/rpc.php?type=%s&arg=%s&v=3"
 
@@ -310,6 +315,8 @@ static struct {
 	  alpm_list_t *pkgs;
 	  alpm_list_t *repos;
 	} ignore;
+
+	struct curl_slist *aur_host;
 } cfg;
 
 /* globals */
@@ -733,6 +740,7 @@ CURL *curl_init_easy_handle(CURL *handle)
 	curl_easy_setopt(handle, CURLOPT_ENCODING, "deflate, gzip");
 	curl_easy_setopt(handle, CURLOPT_CONNECTTIMEOUT, cfg.timeout);
 	curl_easy_setopt(handle, CURLOPT_FOLLOWLOCATION, 1L);
+	curl_easy_setopt(handle, CURLOPT_RESOLVE, cfg.aur_host);
 
 	/* This is required of multi-threaded apps using timeouts. See
 	 * curl_easy_setopt(3) */
@@ -2289,6 +2297,7 @@ void *thread_pool(void *arg)
 		cwr_fprintf(stderr, LOG_ERROR, "curl: failed to initialize handle\n");
 		return NULL;
 	}
+	curl_easy_setopt(curl, CURLOPT_RESOLVE, cfg.aur_host);
 
 	while(1) {
 		job = NULL;
@@ -2406,7 +2415,31 @@ int read_targets_from_file(FILE *in, alpm_list_t **targets) {
 	return 0;
 }
 
+static int where_is_the_aur_today(char **ip) {
+	int r;
+	char buf[128];
+	struct addrinfo *result;
+	struct addrinfo hints = {
+		.ai_family = AF_UNSPEC,
+		.ai_socktype = SOCK_STREAM,
+		.ai_flags = AI_PASSIVE,
+	};
+
+	r = getaddrinfo(AUR_DOMAIN, AUR_PROTO, &hints, &result);
+	if (r < 0) {
+		return r;
+	}
+
+	/* blindly use the first address */
+	inet_ntop(result->ai_family, &((struct sockaddr_in*)result->ai_addr)->sin_addr,
+			buf, result->ai_addrlen);
+
+	/* TODO: don't hardcode 443? */
+	return asprintf(ip, "%s:443:%s", AUR_DOMAIN, buf);
+}
+
 int main(int argc, char *argv[]) {
+	char *aur_ip;
 	alpm_list_t *results = NULL, *thread_return = NULL;
 	int ret, n, num_threads;
 	pthread_t *threads;
@@ -2474,6 +2507,12 @@ int main(int argc, char *argv[]) {
 	cwr_printf(LOG_DEBUG, "initializing curl\n");
 	ret = curl_global_init(CURL_GLOBAL_ALL);
 	openssl_crypto_init();
+
+	if (where_is_the_aur_today(&aur_ip) < 0) {
+		cwr_fprintf(stderr, LOG_ERROR, "failed to resolve aur.archlinux.org:443\n");
+		return 1;
+	}
+	cfg.aur_host = curl_slist_append(NULL, aur_ip);
 
 	if(ret != 0) {
 		cwr_fprintf(stderr, LOG_ERROR, "failed to initialize curl\n");
