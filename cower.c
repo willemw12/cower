@@ -1871,7 +1871,11 @@ void print_pkg_info(aurpkg_t *pkg)
 		} else {
 			instcolor = colstr.utd;
 		}
-		printf(" %s[%sinstalled%s]%s", colstr.url, instcolor, colstr.url, colstr.nc);
+		if(streq(pkg->ver, alpm_pkg_get_version(ipkg))) {
+			printf(" %s[%sinstalled%s]%s", colstr.url, instcolor, colstr.url, colstr.nc);
+		} else {
+			printf(" %s[%sinstalled: %s%s]%s", colstr.url, instcolor, alpm_pkg_get_version(ipkg), colstr.url, colstr.nc);
+		}
 	}
 	fputc('\n', stdout);
 	if(!streq(pkg->name, pkg->pkgbase)) {
@@ -1941,7 +1945,11 @@ void print_pkg_search(aurpkg_t *pkg)
 			} else {
 				instcolor = colstr.utd;
 			}
-			printf(" %s[%sinstalled%s]%s", colstr.url, instcolor, colstr.url, colstr.nc);
+			if(streq(pkg->ver, alpm_pkg_get_version(ipkg))) {
+				printf(" %s[%sinstalled%s]%s", colstr.url, instcolor, colstr.url, colstr.nc);
+			} else {
+				printf(" %s[%sinstalled: %s%s]%s", colstr.url, instcolor, alpm_pkg_get_version(ipkg), colstr.url, colstr.nc);
+			}
 		}
 		printf("\n    ");
 		indentprint(pkg->desc, kSearchIndent);
